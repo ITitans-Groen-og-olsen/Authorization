@@ -1,0 +1,33 @@
+name: .NET Console App CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+
+    env:
+      Solution_Name: Authorization.sln
+      Test_Project_Path: AuthorizationApi.Test/AuthorizationApi.Test.csproj
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore dependencies
+        run: dotnet restore ${{ env.Solution_Name }}
+
+      - name: Build solution
+        run: dotnet build ${{ env.Solution_Name }} --configuration Release --no-restore
+
+      - name: Run tests
+        run: dotnet test ${{ env.Test_Project_Path }} --verbosity normal
