@@ -1,0 +1,49 @@
+services:
+  vault_dev:
+    image: hashicorp/vault:latest
+    restart: on-failure:10
+    ports:
+      - "8201:8201"
+    environment:
+      VAULT_ADDR: "https://0.0.0.0:8201"
+      VAULT_LOCAL_CONFIG: >
+        {
+          "listener": [{
+            "tcp": {
+              "address": "0.0.0.0:8201",
+              "tls_disable": 0,
+              "tls_cert_file": "/data/cert.pem",
+              "tls_key_file": "/data/key.pem"
+            }
+          }],
+          "default_lease_ttl": "168h",
+          "max_lease_ttl": "720h",
+          "ui": true
+        }
+      VAULT_DEV_ROOT_TOKEN_ID: "00000000-0000-0000-0000-000000000000"
+      VAULT_TOKEN: "00000000-0000-0000-0000-000000000000"
+    cap_add:
+      - IPC_LOCK
+    volumes:
+      - ./vault-volume:/data
+    healthcheck:
+      test: ["CMD", "vault", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - goop
+
+  auth-service:
+    image: hjaltehh/auth-service:1.1.0
+    ports:
+      - "5001:8080"
+    environment:
+      - VaultName=https://vault_dev:8201
+      - Secret=Ajx7gZ#Lq8!nD^5eHsY29K@wVmRz0^CtUbQ%p+L3sJmE*xT1FgNr6WdBv!Ha$Z9X
+    networks:
+      - goop
+
+networks:
+  goop:
+    driver: bridge
