@@ -23,18 +23,19 @@ public class AuthController : ControllerBase
         _config = config;
         _logger = logger;
 }
-private string GenerateJwtToken(string email)
+private string GenerateJwtToken(string email, string role)
 {
-    var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["Secret"]));
+    var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(Environment.GetEnvironmentVariable("Secret") ?? "none"));
     var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
 
     var claims = new[]
     {
-        new Claim(ClaimTypes.NameIdentifier, email)
+        new Claim(ClaimTypes.NameIdentifier, email),
+        new Claim(ClaimTypes.Role, role)
     };
 
     var token = new JwtSecurityToken(
-        issuer: _config["Issuer"],
+        issuer: Environment.GetEnvironmentVariable("Issuer") ?? "none",
         audience: "http://localhost",
         claims: claims,
         expires: DateTime.Now.AddMinutes(15),
@@ -49,66 +50,89 @@ private string GenerateJwtToken(string email)
 [HttpPost("UserLogin")]
 public async Task<IActionResult> UserLogin([FromBody] Login login)
 {
+    string role = "User";
     var secret = await GetSecret(login, _config);
-    if (login.Password == secret.ToString())
-    {
-        var token = GenerateJwtToken(login.EmailAddress);
+        if (login.Password == secret.ToString())
+        {
+        var token = GenerateJwtToken(login.EmailAddress,role);
         return Ok(new { token });
-    }
+        }
     return Unauthorized();
 }
 
     [AllowAnonymous]
-[HttpPost("AdminLogin")]
-public async Task<IActionResult> AdminLogin([FromBody] Login login)
-{
-    var secret = await GetSecret(login, _config);
+    [HttpPost("AdminLogin")]
+    public async Task<IActionResult> AdminLogin([FromBody] Login login)
+    {
+        string role = "Admin";
+        var secret = await GetSecret(login, _config);
         if (login.Password == secret.ToString())
         {
-            var token = GenerateJwtToken(login.EmailAddress);
+            var token = GenerateJwtToken(login.EmailAddress, role);
             return Ok(new { token });
         }
-    return Unauthorized();
-}
+        return Unauthorized();
+    }
 
-public async Task<string>GetSecret(Login login, IConfiguration config)
-{
-    var endPoint = config["VaultName"] ?? "<blank>";
-
-    var httpClientHandler = new HttpClientHandler
+    [AllowAnonymous]
+    [HttpGet("GetAnon")]
+    public async Task<string> GetAnon()
     {
-        ServerCertificateCustomValidationCallback = (message, cert, chain, sslPolicyErrors) => true
-    };
+        return "Authorized";
+    }
 
-    // Initialize one of the several auth methods.
-    IAuthMethodInfo authMethod = new TokenAuthMethodInfo("00000000-0000-0000-0000-000000000000");
-
-    // Initialize settings. You can also set proxies, custom delegates, etc. here.
-    var vaultClientSettings = new VaultClientSettings(endPoint, authMethod)
+    [Authorize(Roles = "User, Admin")]
+    [HttpGet("GetUser")]
+    public async Task<string> GetUser()
     {
-        Namespace = "",
-        MyHttpClientProviderFunc = handler => new HttpClient(httpClientHandler)
+        return "Authorized";
+    }
+
+    [Authorize(Roles = "Admin")]
+    [HttpGet("GetAdmin")]
+    public async Task<string> GetAdmin()
+    {
+        return "Authorized";
+    }
+
+public async Task<string> GetSecret(Login login, IConfiguration config)
+    {
+        var endPoint = config["VaultName"] ?? "<blank>";
+
+        var httpClientHandler = new HttpClientHandler
         {
-            BaseAddress = new Uri(endPoint)
+            ServerCertificateCustomValidationCallback = (message, cert, chain, sslPolicyErrors) => true
+        };
+
+        // Initialize one of the several auth methods.
+        IAuthMethodInfo authMethod = new TokenAuthMethodInfo("00000000-0000-0000-0000-000000000000");
+
+        // Initialize settings. You can also set proxies, custom delegates, etc. here.
+        var vaultClientSettings = new VaultClientSettings(endPoint, authMethod)
+        {
+            Namespace = "",
+            MyHttpClientProviderFunc = handler => new HttpClient(httpClientHandler)
+            {
+                BaseAddress = new Uri(endPoint)
+            }
+        };
+
+        IVaultClient vaultClient = new VaultClient(vaultClientSettings);
+
+        // Use client to read a key-value secret.
+        try
+        {
+            Secret<SecretData> kv2Secret = await vaultClient.V1.Secrets.KeyValue.V2
+                .ReadSecretAsync(path: "passwords", mountPoint: "secret");
+
+            var minkode = kv2Secret.Data.Data[login.EmailAddress];
+
+            return minkode.ToString();
         }
-    };
-
-    IVaultClient vaultClient = new VaultClient(vaultClientSettings);
-
-    // Use client to read a key-value secret.
-    try
-    {
-        Secret<SecretData> kv2Secret = await vaultClient.V1.Secrets.KeyValue.V2
-            .ReadSecretAsync(path: "passwords", mountPoint: "secret");
-
-        var minkode = kv2Secret.Data.Data[login.EmailAddress];
-
-        return minkode.ToString();
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving secret from Vault");
+            return string.Empty;
+        }
     }
-    catch (Exception ex)
-    {
-        _logger.LogError(ex, "Error retrieving secret from Vault");
-        return string.Empty;
-    }
-}
 }
