@@ -44,9 +44,10 @@ private string GenerateJwtToken(string email)
     return new JwtSecurityTokenHandler().WriteToken(token);
 }
 
-[AllowAnonymous]
-[HttpPost("login")]
-public async Task<IActionResult> Login([FromBody] Login login)
+
+    [AllowAnonymous]
+[HttpPost("UserLogin")]
+public async Task<IActionResult> UserLogin([FromBody] Login login)
 {
     var secret = await GetSecret(login, _config);
     if (login.Password == secret.ToString())
@@ -54,6 +55,19 @@ public async Task<IActionResult> Login([FromBody] Login login)
         var token = GenerateJwtToken(login.EmailAddress);
         return Ok(new { token });
     }
+    return Unauthorized();
+}
+
+    [AllowAnonymous]
+[HttpPost("AdminLogin")]
+public async Task<IActionResult> AdminLogin([FromBody] Login login)
+{
+    var secret = await GetSecret(login, _config);
+        if (login.Password == secret.ToString())
+        {
+            var token = GenerateJwtToken(login.EmailAddress);
+            return Ok(new { token });
+        }
     return Unauthorized();
 }
 
@@ -89,7 +103,7 @@ public async Task<string>GetSecret(Login login, IConfiguration config)
 
         var minkode = kv2Secret.Data.Data[login.EmailAddress];
 
-        return minkode?.ToString();
+        return minkode.ToString();
     }
     catch (Exception ex)
     {

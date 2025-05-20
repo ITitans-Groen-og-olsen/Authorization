@@ -1,31 +1,21 @@
 services:
-  vault_dev:
+  vault:
     image: hashicorp/vault:latest
-    restart: on-failure:10
+    restart: on-failure
     ports:
       - "8201:8201"
     environment:
       VAULT_ADDR: "https://0.0.0.0:8201"
-      VAULT_LOCAL_CONFIG: >
-        {
-          "listener": [{
-            "tcp": {
-              "address": "0.0.0.0:8201",
-              "tls_disable": 0,
-              "tls_cert_file": "/data/cert.pem",
-              "tls_key_file": "/data/key.pem"
-            }
-          }],
-          "default_lease_ttl": "168h",
-          "max_lease_ttl": "720h",
-          "ui": true
-        }
+      VAULT_API_ADDR: "http://0.0.0.0:8200"
+      VAULT_LOCAL_CONFIG: '{"listener": [{"tcp":{"address": "0.0.0.0:8201", "tls_disable": "0", "tls_cert_file":"/certs/cert.pem", "tls_key_file":"/certs/key.pem"}}], "default_lease_ttl": "168h", "max_lease_ttl": "720h", "ui": true}'
       VAULT_DEV_ROOT_TOKEN_ID: "00000000-0000-0000-0000-000000000000"
       VAULT_TOKEN: "00000000-0000-0000-0000-000000000000"
     cap_add:
       - IPC_LOCK
     volumes:
-      - ./vault-volume:/data
+      - ./certs:/certs
+      - vaultdataVOL:/var/lib/vault:rw
+    command: server -dev -dev-root-token-id="00000000-0000-0000-0000-000000000000"
     healthcheck:
       test: ["CMD", "vault", "status"]
       interval: 10s
@@ -34,15 +24,33 @@ services:
     networks:
       - goop
 
+  vault-init:
+    image: hashicorp/vault:latest
+    command: sh "/app/vault-init.sh"
+    environment:
+      - VAULT_SKIP_VERIFY=true
+    depends_on:
+      - vault
+    healthcheck:
+      retries: 5
+    volumes:
+      - ./Vault-init/vault-init.sh:/app/vault-init.sh
+    networks:
+      - goop
+
   auth-service:
-    image: hjaltehh/auth-service:1.1.0
+    image: auth-service:latest
     ports:
       - "5001:8080"
     environment:
-      - VaultName=https://vault_dev:8201
+      - VaultName=https://vault:8201
       - Secret=Ajx7gZ#Lq8!nD^5eHsY29K@wVmRz0^CtUbQ%p+L3sJmE*xT1FgNr6WdBv!Ha$Z9X
     networks:
       - goop
+
+volumes:
+  vaultdataVOL:
+    external: false
 
 networks:
   goop:
