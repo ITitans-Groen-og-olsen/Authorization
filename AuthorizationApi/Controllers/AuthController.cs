@@ -53,6 +53,7 @@ public class AuthController : ControllerBase
     [HttpPost("UserLogin")]
     public async Task<IActionResult> UserLogin([FromBody] Login login)
     {
+        
         var client = _clientFactory.CreateClient("gateway");
         var endpoint = "/User/login";
         string role = "User";
@@ -60,20 +61,15 @@ public class AuthController : ControllerBase
         Console.WriteLine($"response was {response}");
         var content = await response.Content.ReadFromJsonAsync<Response>();
         Console.WriteLine($"The content is {content}");
+        ResponseObject responseObject = new();
         if (content.loginResult == "true")
         {
             var token = GenerateJwtToken(login.EmailAddress, role);
-
-            var returnObject = new
-            {
-                id = content.id,
-                jwtToken = token
-
-            };
-           
-            return Ok(new { returnObject });
+            responseObject.id = content.id;
+            responseObject.jwtToken = token;
+            return Ok(new { responseObject });
         }
-        return Unauthorized();
+        return Unauthorized(new { responseObject });
     }
 
     [AllowAnonymous]
@@ -157,4 +153,8 @@ public class Response
 {
     public string id { get; set; }
     public string loginResult { get; set; }
+}
+public class ResponseObject {
+    public string id { get; set; }
+    public string jwtToken { get; set; }
 }
