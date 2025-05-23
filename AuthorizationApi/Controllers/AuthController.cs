@@ -10,6 +10,7 @@ using VaultSharp;
 using VaultSharp.V1.AuthMethods.Token;
 using VaultSharp.V1.AuthMethods;
 using VaultSharp.V1.Commons;
+using MongoDB.Bson;
 
 [ApiController]
 [Route("[controller]")]
@@ -17,48 +18,63 @@ public class AuthController : ControllerBase
 {
     private readonly ILogger<AuthController> _logger;
     private readonly IConfiguration _config;
+    private readonly IHttpClientFactory _clientFactory;
 
-   public AuthController(ILogger<AuthController> logger, IConfiguration config)
-{
+    public AuthController(ILogger<AuthController> logger, IConfiguration config, IHttpClientFactory clientFactory)
+    {
         _config = config;
         _logger = logger;
-}
-private string GenerateJwtToken(string email, string role)
-{
-    var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(Environment.GetEnvironmentVariable("Secret") ?? "none"));
-    var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
-
-    var claims = new[]
+        _clientFactory = clientFactory;
+    }
+    private string GenerateJwtToken(string email, string role)
     {
+        var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(Environment.GetEnvironmentVariable("Secret") ?? "none"));
+        var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
+
+        var claims = new[]
+        {
         new Claim(ClaimTypes.NameIdentifier, email),
         new Claim(ClaimTypes.Role, role)
     };
 
-    var token = new JwtSecurityToken(
-        issuer: Environment.GetEnvironmentVariable("Issuer") ?? "none",
-        audience: "http://localhost",
-        claims: claims,
-        expires: DateTime.Now.AddMinutes(15),
-        signingCredentials: credentials
-    );
+        var token = new JwtSecurityToken(
+            issuer: Environment.GetEnvironmentVariable("Issuer") ?? "none",
+            audience: "http://localhost",
+            claims: claims,
+            expires: DateTime.Now.AddMinutes(15),
+            signingCredentials: credentials
+        );
 
-    return new JwtSecurityTokenHandler().WriteToken(token);
-}
+        return new JwtSecurityTokenHandler().WriteToken(token);
+    }
 
 
     [AllowAnonymous]
-[HttpPost("UserLogin")]
-public async Task<IActionResult> UserLogin([FromBody] Login login)
-{
-    string role = "User";
-    var secret = await GetSecret(login, _config);
-        if (login.Password == secret.ToString())
+    [HttpPost("UserLogin")]
+    public async Task<IActionResult> UserLogin([FromBody] Login login)
+    {
+        var client = _clientFactory.CreateClient("gateway");
+        var endpoint = "/User/login";
+        string role = "User";
+        var response = await client.PostAsJsonAsync(endpoint, login);
+        Console.WriteLine($"response was {response}");
+        var content = await response.Content.ReadFromJsonAsync<Response>();
+        Console.WriteLine($"The content is {content}");
+        if (content.loginResult == "true")
         {
-        var token = GenerateJwtToken(login.EmailAddress,role);
-        return Ok(new { token });
+            var token = GenerateJwtToken(login.EmailAddress, role);
+
+            var returnObject = new
+            {
+                id = content.id,
+                jwtToken = token
+
+            };
+           
+            return Ok(new { returnObject });
         }
-    return Unauthorized();
-}
+        return Unauthorized();
+    }
 
     [AllowAnonymous]
     [HttpPost("AdminLogin")]
@@ -95,7 +111,7 @@ public async Task<IActionResult> UserLogin([FromBody] Login login)
         return "Authorized";
     }
 
-public async Task<string> GetSecret(Login login, IConfiguration config)
+    public async Task<string> GetSecret(Login login, IConfiguration config)
     {
         var endPoint = config["VaultName"] ?? "<blank>";
 
@@ -135,4 +151,10 @@ public async Task<string> GetSecret(Login login, IConfiguration config)
             return string.Empty;
         }
     }
+}
+
+public class Response
+{
+    public string id { get; set; }
+    public string loginResult { get; set; }
 }

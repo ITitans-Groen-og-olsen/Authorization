@@ -1,8 +1,18 @@
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
-var builder = WebApplication.CreateBuilder(args);
+using Microsoft.Net.Http.Headers;
+using NLog;
 
+var builder = WebApplication.CreateBuilder(args);
+// Setup gateway client (used to call backend APIs)
+    var gatewayUrl = builder.Configuration["GatewayUrl"] ?? "http://localhost:5002/";
+    builder.Services.AddHttpClient("gateway", client =>
+    {
+        client.BaseAddress = new Uri(gatewayUrl);
+        client.DefaultRequestHeaders.Add(HeaderNames.Accept, "application/json");
+    });
+    Console.WriteLine($"Gateway set to{gatewayUrl}");
 string mySecret = Environment.GetEnvironmentVariable("Secret") ?? "none";
 string myIssuer = Environment.GetEnvironmentVariable("Issuer") ?? "none";
 builder.Services
