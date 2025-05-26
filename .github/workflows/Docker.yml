@@ -17,7 +17,7 @@ jobs:
       id-token: write
     env:
       DOCKER_USER: ${{ secrets.DOCKER_USER }}
-      IMAGE_NAME: User-service
+      IMAGE_NAME: auth-service
       IMAGE_VERSION: 0.1.0
 
     steps:
@@ -31,7 +31,7 @@ jobs:
 
       - name: Build the Docker image
         run: |
-          docker build -t ${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_VERSION} -f UserApi/Dockerfile .
+          docker build -t ${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_VERSION} -f AuthorizationApi/Dockerfile .
 
       - name: Push Docker image to Docker Hub
         run: docker push ${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_VERSION}
