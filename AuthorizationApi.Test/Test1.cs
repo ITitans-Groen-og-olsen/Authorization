@@ -1,73 +1,124 @@
 ﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Moq;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Configuration;
-using Moq;
-using AuthorizationApi.Controllers;
 using Microsoft.AspNetCore.Mvc;
-using System.Collections.Generic;
+using System.Net.Http;
 using System.Threading.Tasks;
+using AuthorizationApi.Controllers;
 using AuthorizationApi.Model;
+using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
+using System.Security.Claims;
+using Microsoft.AspNetCore.Http;
+using System;
 
-namespace AuthServiceTests
+namespace AuthorizationApi.Tests
 {
     [TestClass]
     public class AuthControllerTests
     {
-        private AuthController _controller;
         private Mock<ILogger<AuthController>> _loggerMock;
         private Mock<IConfiguration> _configMock;
+        private Mock<IHttpClientFactory> _clientFactoryMock;
+        private AuthController _controller;
 
         [TestInitialize]
         public void Setup()
         {
             _loggerMock = new Mock<ILogger<AuthController>>();
             _configMock = new Mock<IConfiguration>();
+            _clientFactoryMock = new Mock<IHttpClientFactory>();
 
-            // Configure secrets
-            _configMock.Setup(c => c["Secret"]).Returns("supersecretkey_supersecretkey"); // 32+ chars for HMAC
-            _configMock.Setup(c => c["Issuer"]).Returns("TestIssuer");
-
-            _controller = new AuthController(_loggerMock.Object, _configMock.Object);
+            _controller = new AuthController(_loggerMock.Object, _configMock.Object, _clientFactoryMock.Object);
         }
 
         [TestMethod]
-        public async Task Login_WithValidCredentials_ReturnsToken()
+        public async Task UserLogin_ReturnsOk_WhenLoginSuccessful()
         {
             // Arrange
-            var loginModel = new Login
-            {
-                EmailAddress = "haavy_user",
-                Password = "aaakodeord"
-            };
+            var login = new Login { EmailAddress = "test@example.com", Password = "password123" };
+            var fakeResponse = new Response { id = "123", loginResult = "true" };
+
+            var httpMessageHandler = new MockHttpMessageHandler(JsonSerializer.Serialize(fakeResponse), HttpStatusCode.OK);
+            var client = new HttpClient(httpMessageHandler) { BaseAddress = new Uri("http://localhost") };
+
+            _clientFactoryMock.Setup(_ => _.CreateClient("gateway")).Returns(client);
 
             // Act
-            var result = await _controller.Login(loginModel);
+            var result = await _controller.UserLogin(login);
 
             // Assert
             Assert.IsInstanceOfType(result, typeof(OkObjectResult));
-            var okResult = result as OkObjectResult;
-
-            Assert.IsNotNull(okResult?.Value);
-            var tokenObj = okResult.Value.GetType().GetProperty("token")?.GetValue(okResult.Value, null);
-            Assert.IsInstanceOfType(tokenObj, typeof(string));
-            Assert.IsFalse(string.IsNullOrEmpty(tokenObj as string));
         }
 
         [TestMethod]
-        public async Task Login_WithInvalidCredentials_ReturnsUnauthorized()
+        public async Task UserLogin_ReturnsUnauthorized_WhenLoginFails()
         {
-            // Arrange
-            var loginModel = new Login
-            {
-                EmailAddress = "invalid_user",
-                Password = "wrong_pass"
-            };
+            var login = new Login { EmailAddress = "test@example.com", Password = "wrong" };
+            var fakeResponse = new Response { id = "", loginResult = "false" };
 
-            // Act
-            var result = await _controller.Login(loginModel);
+            var httpMessageHandler = new MockHttpMessageHandler(JsonSerializer.Serialize(fakeResponse), HttpStatusCode.OK);
+            var client = new HttpClient(httpMessageHandler) { BaseAddress = new Uri("http://localhost") };
 
-            // Assert
+            _clientFactoryMock.Setup(_ => _.CreateClient("gateway")).Returns(client);
+
+            var result = await _controller.UserLogin(login);
+
+            Assert.IsInstanceOfType(result, typeof(UnauthorizedObjectResult));
+        }
+
+        [TestMethod]
+        public async Task AdminLogin_ReturnsOk_WhenPasswordIsCorrect()
+        {
+            var login = new Login { EmailAddress = "admin@example.com", Password = "secret" };
+
+            _configMock.Setup(c => c["VaultName"]).Returns("http://localhost:8200");
+
+            var controller = new Mock<AuthController>(_loggerMock.Object, _configMock.Object, _clientFactoryMock.Object) { CallBase = true };
+            controller.Setup(x => x.GetSecret(It.IsAny<Login>(), It.IsAny<IConfiguration>())).ReturnsAsync("secret");
+
+            var result = await controller.Object.AdminLogin(login);
+
+            Assert.IsInstanceOfType(result, typeof(OkObjectResult));
+        }
+
+        [TestMethod]
+        public async Task AdminLogin_ReturnsUnauthorized_WhenPasswordIsIncorrect()
+        {
+            var login = new Login { EmailAddress = "admin@example.com", Password = "wrong" };
+
+            _configMock.Setup(c => c["VaultName"]).Returns("http://localhost:8200");
+
+            var controller = new Mock<AuthController>(_loggerMock.Object, _configMock.Object, _clientFactoryMock.Object) { CallBase = true };
+            controller.Setup(x => x.GetSecret(It.IsAny<Login>(), It.IsAny<IConfiguration>())).ReturnsAsync("secret");
+
+            var result = await controller.Object.AdminLogin(login);
+
             Assert.IsInstanceOfType(result, typeof(UnauthorizedResult));
+        }
+
+    }
+
+    public class MockHttpMessageHandler : HttpMessageHandler
+    {
+        private readonly string _response;
+        private readonly HttpStatusCode _statusCode;
+
+        public MockHttpMessageHandler(string response, HttpStatusCode statusCode)
+        {
+            _response = response;
+            _statusCode = statusCode;
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(new HttpResponseMessage
+            {
+                StatusCode = _statusCode,
+                Content = new StringContent(_response, System.Text.Encoding.UTF8, "application/json")
+            });
         }
     }
 }
