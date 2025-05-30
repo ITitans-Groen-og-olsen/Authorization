@@ -31,7 +31,7 @@ jobs:
 
       - name: Build the Docker image
         run: |
-          docker build -t ${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_VERSION} -f AuthorizationApi/Dockerfile ./AuthorizationApi
+          docker build -t ${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_VERSION} -f AuthorizationApi/Dockerfile .
 
       - name: Push Docker image to Docker Hub
         run: docker push ${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_VERSION}
