@@ -20,23 +20,30 @@ public class AuthController : ControllerBase
     private readonly IConfiguration _config;
     private readonly IHttpClientFactory _clientFactory;
 
+    // Constructor to inject dependencies: logging, configuration, and HTTP client factory
     public AuthController(ILogger<AuthController> logger, IConfiguration config, IHttpClientFactory clientFactory)
     {
         _config = config;
         _logger = logger;
         _clientFactory = clientFactory;
     }
+    // Generates a JWT token for a user/admin
     private string GenerateJwtToken(string email, string role)
     {
-        var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(Environment.GetEnvironmentVariable("Secret") ?? "none"));
+        // Create security key using environment variable (or fallback key)
+        var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(Environment.GetEnvironmentVariable("Secret") ?? "this-is-thefallback-key-which-is-at-least-128-bits"));
+
+        // Generate signing credentials using HMAC SHA256 algorithm
         var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
 
+        // Define claims: email and user role
         var claims = new[]
         {
         new Claim(ClaimTypes.NameIdentifier, email),
         new Claim(ClaimTypes.Role, role)
     };
 
+        // Create the token with issuer, audience, claims, expiration, and signing credentials
         var token = new JwtSecurityToken(
             issuer: Environment.GetEnvironmentVariable("Issuer") ?? "none",
             audience: "http://localhost",
@@ -53,23 +60,29 @@ public class AuthController : ControllerBase
     [HttpPost("UserLogin")]
     public async Task<IActionResult> UserLogin([FromBody] Login login)
     {
-        
+         // Create an HTTP client for calling the external gateway API
         var client = _clientFactory.CreateClient("gateway");
         var endpoint = "/User/login";
         string role = "User";
+        
+        // Post that uses the login method inside the userService to validate login credential
         var response = await client.PostAsJsonAsync(endpoint, login);
         Console.WriteLine($"response was {response}");
+        
         var content = await response.Content.ReadFromJsonAsync<Response>();
         Console.WriteLine($"The content is {content}");
         ResponseObject responseObject = new();
+
+        // If login is successful, generate a token and return i
         if (content.loginResult == "true")
         {
             var token = GenerateJwtToken(login.EmailAddress, role);
             responseObject.id = content.id;
             responseObject.jwtToken = token;
-            return Ok(new { responseObject });
+            return Ok(responseObject);
         }
-        return Unauthorized(new { responseObject });
+        // If login fails return Unauthorized
+        return Unauthorized(responseObject);
     }
 
     [AllowAnonymous]
@@ -77,49 +90,34 @@ public class AuthController : ControllerBase
     public async Task<IActionResult> AdminLogin([FromBody] Login login)
     {
         string role = "Admin";
+        // Retrieve the secret (admin password) from HashiCorp Vault
         var secret = await GetSecret(login, _config);
+
+        // Check if the password matches the secret
         if (login.Password == secret.ToString())
         {
             var token = GenerateJwtToken(login.EmailAddress, role);
             return Ok(new { token });
         }
+        // If login fails return Unauthorized
         return Unauthorized();
     }
 
-    [AllowAnonymous]
-    [HttpGet("GetAnon")]
-    public async Task<string> GetAnon()
-    {
-        return "Authorized";
-    }
-
-    [Authorize(Roles = "User, Admin")]
-    [HttpGet("GetUser")]
-    public async Task<string> GetUser()
-    {
-        return "Authorized";
-    }
-
-    [Authorize(Roles = "Admin")]
-    [HttpGet("GetAdmin")]
-    public async Task<string> GetAdmin()
-    {
-        return "Authorized";
-    }
-
-    public async Task<string> GetSecret(Login login, IConfiguration config)
+    // Retrieves password from Vault based on admin email
+    protected virtual async Task<string> GetSecret(Login login, IConfiguration config)
     {
         var endPoint = config["VaultName"] ?? "<blank>";
 
+        // Accept all SSL certificates
         var httpClientHandler = new HttpClientHandler
         {
             ServerCertificateCustomValidationCallback = (message, cert, chain, sslPolicyErrors) => true
         };
 
-        // Initialize one of the several auth methods.
+        // Configure Vault authentication using a static token
         IAuthMethodInfo authMethod = new TokenAuthMethodInfo("00000000-0000-0000-0000-000000000000");
 
-        // Initialize settings. You can also set proxies, custom delegates, etc. here.
+        // Configure Vault authentication using a static token
         var vaultClientSettings = new VaultClientSettings(endPoint, authMethod)
         {
             Namespace = "",
@@ -149,12 +147,16 @@ public class AuthController : ControllerBase
     }
 }
 
+// DataTransferObject for login response from userService
 public class Response
 {
     public string id { get; set; }
     public string loginResult { get; set; }
 }
-public class ResponseObject {
+// Object returned to client on successful login
+// Used to transfer userId and JwtToken
+public class ResponseObject
+{
     public string id { get; set; }
     public string jwtToken { get; set; }
 }
